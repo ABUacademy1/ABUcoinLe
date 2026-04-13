@@ -1,0 +1,297 @@
+import os
+import json
+import hashlib
+import qrcode
+import time
+import threading
+from Crypto.Cipher import AES
+from base64 import b64encode, b64decode
+
+# ---------------- PATHS & KEYS ---------------- #
+PICTURES_PATH = "/sdcard/Pictures/"
+DB_FILE = "processed_sim_txs.txt"
+HISTORY_FILE = "tx_history.txt"
+BALANCE_FILE = "balance.txt"
+SECRET_KEY = hashlib.sha256(b"ABUacademy_secret_key_2026").digest()
+
+# ---------------- USER ID ---------------- #
+USER_ID = "USER_001"  # change this لكل مستخدم
+
+# ---------------- COLORS ---------------- #
+RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+CYAN = "\033[96m"
+RESET = "\033[0m"
+
+# ---------------- HEADER ---------------- #
+def header():
+    print(CYAN + r"""
+█████╗ ██████╗ ██╗   ██╗ LE with no internet  
+██╔══██╗██╔══██╗██║   ██║╔════════════════════╗
+███████║██████╔╝██║   ██║║    ABU Coin Tool   ║
+██╔══██║██╔══██╗██║   ██║║       ABULe  ..    ║
+██║  ██║██████╔╝╚██████╔╝╚════════════════════╝
+╚═╝  ╚═╝╚═════╝  ╚═════╝Academy By Mr.Mohammed 
+(◠‿◕) ◖⚆ᴥ⚆◗ (◉‿◉)┗(•ˇ_ˇ•)―→ (╭☞•́⍛•̀)╭☞ Sameh
+
+    """ + RESET)
+    print(YELLOW + "===== ABULe Tool by ABU Academy =====" + RESET)
+    print(f"User ID: {USER_ID}")
+    print("Network: ABULe (LE)")
+    print("All files encrypted with AES-256")
+    print(GREEN + "💡 This tool is made by ABU Academy" + RESET)
+
+    # الإضافة المطلوبة
+    print(RED + "💱 To convert balance to Vodafone Cash or other wallets:" + RESET)
+    print(YELLOW + "Call or WhatsApp:" + RESET)
+    print(GREEN + "00201145067619" + RESET)
+    print(GREEN + "00201064650747" + RESET)
+
+    print("---------------------------------------------------\n")
+
+# ---------------- AES ENCRYPTION ---------------- #
+def encrypt_data(data):
+    cipher = AES.new(SECRET_KEY, AES.MODE_EAX)
+    ciphertext, tag = cipher.encrypt_and_digest(json.dumps(data).encode())
+    return b64encode(cipher.nonce + tag + ciphertext).decode()
+
+def decrypt_data(enc):
+    raw = b64decode(enc.encode())
+    nonce, tag, ciphertext = raw[:16], raw[16:32], raw[32:]
+    cipher = AES.new(SECRET_KEY, AES.MODE_EAX, nonce=nonce)
+    return json.loads(cipher.decrypt_and_verify(ciphertext, tag))
+
+# ---------------- BALANCE ---------------- #
+def get_balance():
+    if not os.path.exists(BALANCE_FILE):
+        set_balance(10.0)
+        return 0.0
+    with open(BALANCE_FILE, "r") as f:
+        enc_balance = f.read().strip()
+    try:
+        return float(decrypt_data(enc_balance))
+    except:
+        return 0.0
+
+def set_balance(value):
+    enc_balance = encrypt_data(value)
+    with open(BALANCE_FILE, "w") as f:
+        f.write(enc_balance)
+
+# ---------------- SAVE HISTORY ---------------- #
+def save_history(entry):
+    with open(HISTORY_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+# ---------------- ANTI DUPLICATE ---------------- #
+def is_code_used(code_hash):
+    if not os.path.exists(DB_FILE):
+        return False
+    return code_hash in open(DB_FILE).read().splitlines()
+
+def mark_code_used(code_hash):
+    with open(DB_FILE, "a") as f:
+        f.write(code_hash + "\n")
+
+# ---------------- EXPIRY ---------------- #
+def is_expired(timestamp):
+    return (time.time() - timestamp) > 120
+
+# ---------------- TIMER THREAD ---------------- #
+def start_timer_thread(timestamp):
+    def timer():
+        total = 120
+        while True:
+            elapsed = int(time.time() - timestamp)
+            remaining = total - elapsed
+            if remaining <= 0:
+                print("\r⏰ EXPIRED!                           ")
+                break
+            progress = int((elapsed / total) * 30)
+            bar = "█" * progress + "-" * (30 - progress)
+            print(f"\r⏳ [{bar}] {remaining}s left", end="")
+            time.sleep(1)
+    t = threading.Thread(target=timer, daemon=True)
+    t.start()
+
+# ---------------- CREATE SIMULATED TX ---------------- #
+def create_tx_sim():
+    header()
+    user_balance = get_balance()
+    print(f"{GREEN}💰 Your balance: {user_balance} ABULe{RESET}")
+    
+    sender = input("🔑 Sender Name: ")
+    receiver = input("📥 Receiver Name: ")
+    receiver_id = input("🆔 Enter Receiver ID: ")
+    amount = float(input("💰 Amount: "))
+
+    if amount > user_balance:
+        print(RED + "❌ Amount exceeds your balance!" + RESET)
+        return
+
+    tx_data = {
+        "type": "sent",
+        "from": sender,
+        "to": receiver,
+        "receiver_id": receiver_id,
+        "sender_id": USER_ID,
+        "amount": amount,
+        "tx_id": hashlib.sha256(os.urandom(16)).hexdigest(),
+        "timestamp": time.time()
+    }
+
+    encrypted = encrypt_data(tx_data)
+    tx_hash = hashlib.sha256(encrypted.encode()).hexdigest()
+    path = os.path.join(PICTURES_PATH, f"tx_{tx_hash[:10]}.sim")
+
+    with open(path, "w") as f:
+        f.write(encrypted)
+
+    qr = qrcode.make(encrypted)
+    qr.save(path.replace(".sim", ".png"))
+
+    print(GREEN + "✅  TX saved and encrypted:" + RESET, path)
+    print("\n📋 Currency Code (Copy this):\n")
+    print(YELLOW + encrypted + RESET)
+    print("\n📌 Send this code to receiver\n")
+
+    save_history(tx_data)
+    set_balance(user_balance - amount)
+    print(f"💸 {amount} ABULe deducted. New balance: {get_balance()} ABULe")
+
+    start_timer_thread(tx_data["timestamp"])
+
+# ---------------- RECEIVE FROM FILE ---------------- #
+def receive_all_sim():
+    header()
+    user_balance = get_balance()
+    found = []
+
+    for root, dirs, files in os.walk(PICTURES_PATH):
+        for file in files:
+            if file.startswith("tx_") and file.endswith(".sim"):
+                found.append(os.path.join(root, file))
+
+    if not found:
+        print(RED + "❌ No new simulated transactions" + RESET)
+        return
+
+    total_added = 0
+    for i, path in enumerate(found):
+        enc = open(path).read()
+        code_hash = hashlib.sha256(enc.encode()).hexdigest()
+        if is_code_used(code_hash):
+            continue
+
+        data = decrypt_data(enc)
+
+        if data.get("receiver_id") != USER_ID:
+            print(RED + f"{i+1}) Skipped (Wrong User ID)" + RESET)
+            continue
+
+        if is_expired(data["timestamp"]):
+            print(RED + f"{i+1}) Code expired, skipped" + RESET)
+            os.remove(path)
+            continue
+
+        print(f"{i+1}) FROM: {data['from']} → TO: {data['to']} | {data['amount']} ABULe")
+
+        history_entry = data.copy()
+        history_entry["type"] = "received_file"
+        save_history(history_entry)
+
+        mark_code_used(code_hash)
+        os.remove(path)
+        total_added += data['amount']
+
+    if total_added > 0:
+        set_balance(user_balance + total_added)
+        print(GREEN + f"💰 Total received: {total_added} ABULe added. New balance: {get_balance()} ABULe" + RESET)
+
+# ---------------- RECEIVE FROM CODE ---------------- #
+def receive_from_code():
+    header()
+    user_balance = get_balance()
+    code = input("📥 Enter Currency Code: ").strip()
+    code_hash = hashlib.sha256(code.encode()).hexdigest()
+
+    if is_code_used(code_hash):
+        print(RED + "❌ This code was already used!" + RESET)
+        return
+
+    try:
+        data = decrypt_data(code)
+
+        if data.get("receiver_id") != USER_ID:
+            print(RED + "❌ This code is not assigned to your User ID!" + RESET)
+            return
+
+        if is_expired(data["timestamp"]):
+            print(RED + "⏰ Code expired!" + RESET)
+            return
+
+        print(GREEN + "\n✅ Valid Code!" + RESET)
+        print(f"FROM: {data['from']} → TO: {data['to']}")
+        print(f"💰 Amount: {data['amount']} ABULe")
+
+        history_entry = data.copy()
+        history_entry["type"] = "received_code"
+        save_history(history_entry)
+
+        set_balance(user_balance + data['amount'])
+        mark_code_used(code_hash)
+
+        print(f"\n💰 Added: {data['amount']} ABULe")
+        print(f"💼 New Balance: {get_balance()} ABULe")
+
+    except:
+        print(RED + "❌ Invalid or corrupted code!" + RESET)
+
+# ---------------- VIEW HISTORY ---------------- #
+def view_history():
+    header()
+    if not os.path.exists(HISTORY_FILE):
+        print(RED + "❌ No transaction history" + RESET)
+        return
+    with open(HISTORY_FILE) as f:
+        for line in f:
+            tx = json.loads(line)
+            print(f"[{tx['type'].upper()}] {tx['from']} → {tx['to']} | {tx['amount']} ABULe")
+
+# ---------------- MENU ---------------- #
+def menu():
+    while True:
+        header()
+        user_balance = get_balance()
+        print(CYAN + "\n===== ABULe TOOL =====" + RESET)
+        print(f"💰 Your balance: {user_balance} ABULe")
+        print("1 User Guide")
+        print("2 Create ABULe TX")
+        print("3 Receive From Files")
+        print("4 Receive From Code")
+        print("5 View Transaction History")
+        print("0 Exit")
+
+        c = input("👉 ")
+
+        if c == "1":
+            header()
+            print("📘 Guide:\n- Create TX\n- Share code or file\n- Receive using code or file")
+
+        elif c == "2":
+            create_tx_sim()
+
+        elif c == "3":
+            receive_all_sim()
+
+        elif c == "4":
+            receive_from_code()
+
+        elif c == "5":
+            view_history()
+
+        elif c == "0":
+            break
+
+menu()
