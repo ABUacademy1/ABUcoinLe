@@ -15,7 +15,7 @@ BALANCE_FILE = "balance.txt"
 SECRET_KEY = hashlib.sha256(b"ABUacademy_secret_key_2026").digest()
 
 # ---------------- USER ID ---------------- #
-USER_ID = "USER_001"  # change this لكل مستخدم
+USER_ID = "4700"  # change this لكل مستخدم
 
 # ---------------- COLORS ---------------- #
 RED = "\033[91m"
